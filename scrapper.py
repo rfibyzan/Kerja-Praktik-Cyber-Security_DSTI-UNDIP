@@ -104,7 +104,7 @@ async def process_all_domains(domain_list):
 
 if __name__ == "__main__":
     target_utama = "undip.ac.id"
-    API_SATRIA_URL = "http://127.0.0.1:8000/api/domains/add"
+    API_DATABASE_URL = "http://127.0.0.1:8000/api/domains/add"
     
     async def jalankan_sistem():
         print("="*60)
@@ -141,9 +141,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[-] Gagal menyimpan file JSON lokal: {str(e)}")
 
-        print(f"\n[*] Mengirim payload JSON ke Backend Satria ({API_SATRIA_URL})...")
+        print(f"\n[*] Mengirim payload JSON ke Backend Satria ({API_DATABASE_URL})...")
         try:
-            response = requests.post(API_SATRIA_URL, json=hasil_bersih, timeout=10)
+            response = requests.post(API_DATABASE_URL, json=hasil_bersih, timeout=10)
             
             if response.status_code in [200, 201]:
                 print("[+] BINGO! Data berhasil disetorkan ke Database.")
