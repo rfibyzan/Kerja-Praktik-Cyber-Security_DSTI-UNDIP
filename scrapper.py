@@ -9,13 +9,15 @@ import json
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-async def fetch_from_crtsh(root_domain):
+# =======================================================================
+# MODUL 1: OSINT INTELLIGENCE (Menarik data dari crt.sh dengan fitur Retry)
+# =======================================================================
+async def fetch_from_crtsh(root_domain, max_retries=3):
     print(f"[*] Menarik data intelijen OSINT dari crt.sh untuk: {root_domain}...")
     url = f"https://crt.sh/?q={root_domain}&output=json"
     
     subdomains = set() 
     
-    # Menggunakan ThreadedResolver untuk mencegah bug DNS di Windows
     resolver = aiohttp.ThreadedResolver()
     connector = aiohttp.TCPConnector(family=socket.AF_INET, ssl=False, resolver=resolver)
     
@@ -24,26 +26,48 @@ async def fetch_from_crtsh(root_domain):
         "Accept": "application/json"
     }
     
-    try:
-        async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
-            async with session.get(url, timeout=20) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    for entry in data:
-                        name_val = entry.get("name_value", "")
-                        for name in name_val.split("\n"):
-                            name = name.strip().lower()
-                            if not name.startswith("*") and name.endswith(root_domain):
-                                subdomains.add(name)
-                                
-                    print(f"[+] Berhasil menemukan {len(subdomains)} subdomain mentah yang pernah dibuat.")
-                    return list(subdomains)
-                else:
-                    print(f"[-] API crt.sh menolak permintaan (Status: {response.status}).")
-    except Exception as e:
-        print(f"[-] Gagal terhubung ke crt.sh: {str(e)}")
+    # Membuka sesi HTTP sekali untuk digunakan berulang kali jika gagal
+    async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
         
+        # LOOPING RETRY: Akan berulang maksimal sesuai nilai max_retries (3 kali)
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with session.get(url, timeout=25) as response:
+                    # JIKA SUKSES
+                    if response.status == 200:
+                        data = await response.json()
+                        for entry in data:
+                            name_val = entry.get("name_value", "")
+                            for name in name_val.split("\n"):
+                                name = name.strip().lower()
+                                if not name.startswith("*") and name.endswith(root_domain):
+                                    subdomains.add(name)
+                                    
+                        print(f"[+] Berhasil menemukan {len(subdomains)} subdomain mentah yang pernah dibuat.")
+                        return list(subdomains)
+                    
+                    # JIKA SERVER KELEBIHAN BEBAN (502, 503, 504)
+                    elif response.status in [502, 503, 504]:
+                        print(f"[-] crt.sh sedang kelebihan beban (Status: {response.status}). Percobaan {attempt}/{max_retries}...")
+                    
+                    # JIKA ERROR LAINNYA
+                    else:
+                        print(f"[-] API crt.sh menolak permintaan (Status: {response.status}). Percobaan {attempt}/{max_retries}...")
+                        
+            except asyncio.TimeoutError:
+                print(f"[-] API crt.sh tidak merespons (Timeout). Percobaan {attempt}/{max_retries}...")
+            except Exception as e:
+                print(f"[-] Gagal terhubung ke crt.sh: {str(e)}. Percobaan {attempt}/{max_retries}...")
+            
+            # Jika ini bukan percobaan terakhir, tunggu sebelum mencoba lagi (Backoff Mechanism)
+            if attempt < max_retries:
+                # Waktu tunggu akan bertambah lama setiap kali gagal (5 detik, lalu 10 detik)
+                waktu_tunggu = 5 * attempt
+                print(f"[*] Bersabar... Menunggu {waktu_tunggu} detik sebelum mencoba mengetuk lagi...\n")
+                await asyncio.sleep(waktu_tunggu)
+                
+    # Jika loop selesai dan masih gagal
+    print("\n[-] crt.sh sedang lumpuh total hari ini. Gagal mengekstrak OSINT setelah 3 kali percobaan.")
     return []
 
 async def check_and_resolve_domain(session, raw_domain, semaphore):
